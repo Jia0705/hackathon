@@ -11,8 +11,9 @@ import path from 'path';
 
 const START_SCHEMA = z.object({
   files: z.array(z.string()).optional(),
-  speed: z.number().min(1).max(100).default(1),
+  speed: z.number().min(1).max(10000).default(1),
   tripGapMinutes: z.number().min(1).max(120).default(20),
+  skipDelays: z.boolean().default(false), // Fast-forward mode
 });
 
 export async function POST(request: NextRequest) {
@@ -39,6 +40,7 @@ export async function POST(request: NextRequest) {
       files,
       speed: config.speed,
       tripGapMinutes: config.tripGapMinutes,
+      skipDelays: config.skipDelays,
     });
     
     return NextResponse.json({
@@ -56,8 +58,10 @@ export async function POST(request: NextRequest) {
       );
     }
     
+    const errorMessage = error instanceof Error ? error.message : 'Failed to start simulator';
+    
     return NextResponse.json(
-      { error: 'Failed to start simulator' },
+      { error: errorMessage },
       { status: 500 }
     );
   }

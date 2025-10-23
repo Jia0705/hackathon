@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Database Control Panel</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 { margin-top: 0; color: #333; }
+        h2 { color: #555; font-size: 18px; margin-top: 0; }
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-right: 10px;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: #3b82f6;
+            color: white;
+        }
+        .btn-primary:hover { background: #2563eb; }
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+        }
+        .btn-danger:hover { background: #dc2626; }
+        .btn-success {
+            background: #10b981;
+            color: white;
+        }
+        .btn-success:hover { background: #059669; }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin: 16px 0;
+        }
+        .stat {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: #f9fafb;
+            border-radius: 4px;
+        }
+        .stat-value {
+            font-weight: bold;
+            color: #3b82f6;
+        }
+        .log {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 16px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        .success { color: #10b981; }
+        .error { color: #ef4444; }
+        .warning { color: #f59e0b; }
+    </style>
+</head>
+<body>
+    <h1>🛠️ Database Control Panel</h1>
+    
+    <div class="card">
+        <h2>📊 Current Database Stats</h2>
+        <div class="stats" id="stats">
+            <div class="stat">
+                <span>Loading...</span>
+                <span class="stat-value">-</span>
+            </div>
+        </div>
+        <button class="btn-primary" onclick="loadStats()">🔄 Refresh Stats</button>
+    </div>
+
+    <div class="card">
+        <h2>🎮 Quick Actions</h2>
+        <button class="btn-danger" onclick="resetDatabase()">🗑️ Reset Database</button>
+        <button class="btn-success" onclick="resetSimulator()">🔄 Reset Simulator</button>
+        <button class="btn-primary" onclick="runDiagnostic()">🔍 Run Diagnostic</button>
+        <button class="btn-primary" onclick="testDataFlow()">🧪 Test Data Flow</button>
+    </div>
+
+    <div class="card">
+        <h2>🔗 Quick Links</h2>
+        <button class="btn-primary" onclick="openDashboard()">📊 Dashboard</button>
+        <button class="btn-primary" onclick="window.open('/alerts-test.html')">🚨 Alerts Test</button>
+    </div>
+
+    <div class="card">
+        <h2>📝 Activity Log</h2>
+        <div class="log" id="log"></div>
+    </div>
+
+    <script>
+        let logContent = [];
+
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const className = type === 'error' ? 'error' : type === 'success' ? 'success' : type === 'warning' ? 'warning' : '';
+            logContent.push(`[${timestamp}] ${message}`);
+            if (logContent.length > 50) logContent.shift();
+            document.getElementById('log').innerHTML = logContent.map((line, i) => {
+                const isLast = i === logContent.length - 1;
+                return `<div class="${isLast ? className : ''}">${line}</div>`;
+            }).join('');
+            document.getElementById('log').scrollTop = document.getElementById('log').scrollHeight;
+        }
+
+        async function loadStats() {
+            log('Loading database statistics...');
+            try {
+                const response = await fetch('/api/db/stats');
+                const data = await response.json();
+                
+                if (data.ok) {
+                    const stats = data.stats;
+                    const html = `
+                        <div class="stat">
+                            <span>Vehicles</span>
+                            <span class="stat-value">${stats.vehicles}</span>
+                        </div>
+                        <div class="stat">
+                            <span>Trips</span>
+                            <span class="stat-value">${stats.trips}</span>
+                        </div>
+                        <div class="stat">
+                            <span>GPS Points</span>
+                            <span class="stat-value">${stats.gpsPoints.toLocaleString()}</span>
+                        </div>
+                        <div class="stat">
+                            <span>Drops</span>
+                            <span class="stat-value">${stats.drops.toLocaleString()}</span>
+                        </div>
+                        <div class="stat">
+                            <span>Corridors</span>
+                            <span class="stat-value" style="color: ${stats.corridors > 0 ? '#10b981' : '#ef4444'}">${stats.corridors}</span>
+                        </div>
+                        <div class="stat">
+                            <span>Traversals</span>
+                            <span class="stat-value" style="color: ${stats.traversals > 0 ? '#10b981' : '#ef4444'}">${stats.traversals}</span>
+                        </div>
+                        <div class="stat">
+                            <span>Baselines</span>
+                            <span class="stat-value">${stats.corridorStats}</span>
+                        </div>
+                        <div class="stat">
+                            <span>Alerts</span>
+                            <span class="stat-value">${stats.alerts}</span>
+                        </div>
+                    `;
+                    document.getElementById('stats').innerHTML = html;
+                    
+                    log('✅ Stats loaded successfully', 'success');
+                    
+                    if (stats.corridors === 0 && stats.gpsPoints > 0) {
+                        log('⚠️ Warning: GPS data exists but no corridors found!', 'warning');
+                    } else if (stats.corridors > 0) {
+                        log(`✅ ${stats.corridors} corridors with ${stats.traversals} traversals`, 'success');
+                    }
+                } else {
+                    log('❌ Error loading stats: ' + data.error, 'error');
+                }
+            } catch (error) {
+                log('❌ Error: ' + error.message, 'error');
+            }
+        }
+
+        async function resetDatabase() {
+            if (!confirm('⚠️ Are you sure? This will DELETE ALL DATA from the database!')) {
+                return;
+            }
+            
+            log('Resetting database...', 'warning');
+            try {
+                const response = await fetch('/api/db/reset', { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.ok) {
+                    log('✅ Database reset successfully!', 'success');
+                    await loadStats();
+                } else {
+                    log('❌ Reset failed: ' + data.error, 'error');
+                }
+            } catch (error) {
+                log('❌ Error: ' + error.message, 'error');
+            }
+        }
+
+        async function resetSimulator() {
+            log('Resetting simulator state...');
+            try {
+                const response = await fetch('/api/simulator/reset', { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.ok) {
+                    log('✅ Simulator reset successfully!', 'success');
+                } else {
+                    log('❌ Reset failed: ' + data.error, 'error');
+                }
+            } catch (error) {
+                log('❌ Error: ' + error.message, 'error');
+            }
+        }
+
+        async function runDiagnostic() {
+            log('Running system diagnostic...');
+            try {
+                const response = await fetch('/api/diagnostic');
+                const data = await response.json();
+                
+                log('📋 Diagnostic Results:');
+                log('Status: ' + data.status, data.status.includes('✅') ? 'success' : 'warning');
+                
+                Object.entries(data.checks).forEach(([key, value]) => {
+                    log(`  ${key}: ${JSON.stringify(value)}`);
+                });
+                
+                if (data.errors && data.errors.length > 0) {
+                    data.errors.forEach(err => log('❌ ' + err, 'error'));
+                }
+                
+                if (data.warnings && data.warnings.length > 0) {
+                    data.warnings.forEach(warn => log('⚠️ ' + warn, 'warning'));
+                }
+                
+                log('✅ Diagnostic complete', 'success');
+            } catch (error) {
+                log('❌ Diagnostic failed: ' + error.message, 'error');
+            }
+        }
+
+        async function testDataFlow() {
+            log('Testing data flow with sample data...');
+            try {
+                const response = await fetch('/api/test/flow', { method: 'POST' });
+                const data = await response.json();
+                
+                log('🧪 Data Flow Test Results:');
+                log('Status: ' + data.status, data.status.includes('✅') ? 'success' : 'warning');
+                
+                data.steps.forEach(step => {
+                    log(`  Step ${step.step}: ${step.description} - ${step.status}`);
+                    if (step.output !== undefined) {
+                        log(`    Input: ${step.input}, Output: ${step.output}`);
+                    }
+                });
+                
+                if (data.recommendation) {
+                    log('💡 ' + data.recommendation, 'warning');
+                }
+                
+                if (data.issues) {
+                    data.issues.forEach(issue => log(issue, 'error'));
+                }
+                
+                log('✅ Test complete', 'success');
+            } catch (error) {
+                log('❌ Test failed: ' + error.message, 'error');
+            }
+        }
+
+        function openDashboard() {
+            window.location.href = '/';
+        }
+
+        // Auto-load stats on page load
+        loadStats();
+        
+        // Auto-refresh every 5 seconds
+        setInterval(loadStats, 5000);
+        
+        log('🚀 Control panel ready');
+    </script>
+</body>
+</html>

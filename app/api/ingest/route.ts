@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { detectDrops, extractCorridors, GPSFix } from '@/lib/gps-processing';
+import { detectDrops, extractCorridors, extractCorridorsFromPoints, GPSFix } from '@/lib/gps-processing';
 import { computeBaselines } from '@/lib/baseline-computation';
 import { checkAndCreateAlerts } from '@/lib/alert-service';
 
@@ -24,6 +24,7 @@ const GPS_POINT_SCHEMA = z.object({
 const BATCH_SCHEMA = z.array(GPS_POINT_SCHEMA);
 
 const TRIP_GAP_MINUTES = 20;
+const MAX_POINTS_PER_REQUEST = 2000; // Increased batch limit for faster processing
 
 export async function POST(request: NextRequest) {
   try {
@@ -31,7 +32,25 @@ export async function POST(request: NextRequest) {
     
     // Support both single point and batch ingestion
     const points = Array.isArray(body) ? body : [body];
-    const validatedPoints = BATCH_SCHEMA.parse(points);
+    
+    // SAFETY: Limit batch size to prevent overload
+    if (points.length > MAX_POINTS_PER_REQUEST) {
+      console.log(`[INGEST] ⚠️ Batch too large: ${points.length} points, limiting to ${MAX_POINTS_PER_REQUEST}`);
+      return NextResponse.json({
+        error: `Batch too large. Maximum ${MAX_POINTS_PER_REQUEST} points per request.`,
+        received: points.length,
+      }, { status: 400 });
+    }
+    
+    try {
+      var validatedPoints = BATCH_SCHEMA.parse(points);
+    } catch (validationError) {
+      console.error('[INGEST] Validation error:', validationError);
+      console.error('[INGEST] Sample point:', JSON.stringify(points[0]));
+      throw validationError;
+    }
+    
+    console.log(`[INGEST] Received ${validatedPoints.length} GPS points`);
     
     if (validatedPoints.length === 0) {
       return NextResponse.json({ error: 'No points provided' }, { status: 400 });
@@ -116,18 +135,33 @@ export async function POST(request: NextRequest) {
         }
         
         // Insert GPS points (batch)
-        await prisma.gPSPoint.createMany({
-          data: tripPoints.map(p => ({
+        try {
+          const gpsData = tripPoints.map(p => ({
             tripId: trip.id,
             ts: new Date(p.ts),
             lat: p.lat,
             lon: p.lon,
-            speed: p.speed,
-            accuracy: p.accuracy,
-            heading: p.heading,
-          })),
-          skipDuplicates: true,
-        });
+            speed: p.speed || null,
+            accuracy: p.accuracy || null,
+            heading: p.heading || null,
+          }));
+          
+          console.log(`[INGEST] Attempting to store ${gpsData.length} GPS points for trip ${trip.id}`);
+          console.log(`[INGEST] Sample GPS point:`, JSON.stringify(gpsData[0]));
+          
+          const result = await prisma.gPSPoint.createMany({
+            data: gpsData,
+          });
+          
+          console.log(`[INGEST] ✅ Stored ${result.count} GPS points for trip ${trip.id}`);
+        } catch (gpsError) {
+          console.error(`[INGEST] ❌ Failed to store GPS points:`, gpsError);
+          if (gpsError instanceof Error) {
+            console.error(`[INGEST] Error details:`, gpsError.message);
+            console.error(`[INGEST] Stack:`, gpsError.stack);
+          }
+          throw gpsError;
+        }
         
         // Detect drops
         const gpsFixes: GPSFix[] = tripPoints.map(p => ({
@@ -141,6 +175,8 @@ export async function POST(request: NextRequest) {
         
         const tauShort = parseInt(process.env.TAU_SHORT || '60');
         const drops = detectDrops(gpsFixes, tauShort);
+        
+        console.log(`[INGEST] Trip ${trip.id}: ${tripPoints.length} points -> ${drops.length} drops detected`);
         
         // Store drops
         if (drops.length > 0) {
@@ -159,87 +195,137 @@ export async function POST(request: NextRequest) {
           });
         }
         
-        // Extract corridors from drops
+        // Extract corridors from drops (blindspots/signal loss)
         const h3Res = parseInt(process.env.H3_RESOLUTION || '7');
-        const traversals = extractCorridors(drops, h3Res);
+        const dropCorridors = extractCorridors(drops, h3Res);
         
-        for (const traversal of traversals) {
-          const { corridorKey, ...traversalData } = traversal;
-          
-          // Find or create corridor
-          let corridor = await prisma.corridor.findUnique({
-            where: {
-              aH3_bH3_direction: {
-                aH3: corridorKey.aH3,
-                bH3: corridorKey.bH3,
-                direction: corridorKey.direction,
-              },
-            },
-          });
-          
-          if (!corridor) {
-            corridor = await prisma.corridor.create({
-              data: {
-                aH3: corridorKey.aH3,
-                bH3: corridorKey.bH3,
-                direction: corridorKey.direction,
-              },
-            });
+        // Extract corridors from normal consecutive GPS points (regular movement)
+        const movementCorridors = extractCorridorsFromPoints(gpsFixes, h3Res);
+        
+        // Combine both types of corridors
+        const allTraversals = [...dropCorridors, ...movementCorridors];
+        
+        console.log(`[INGEST] Trip ${trip.id}: ${dropCorridors.length} drop corridors + ${movementCorridors.length} movement corridors = ${allTraversals.length} total traversals`);
+        
+        // Batch process corridors: collect unique corridor keys first
+        const corridorKeys = allTraversals.map(t => t.corridorKey);
+        const uniqueKeys = new Map<string, typeof corridorKeys[0]>();
+        
+        for (const key of corridorKeys) {
+          const keyStr = `${key.aH3}_${key.bH3}_${key.direction}`;
+          if (!uniqueKeys.has(keyStr)) {
+            uniqueKeys.set(keyStr, key);
           }
+        }
+        
+        // Batch find existing corridors
+        const existingCorridors = await prisma.corridor.findMany({
+          where: {
+            OR: Array.from(uniqueKeys.values()).map(key => ({
+              aH3: key.aH3,
+              bH3: key.bH3,
+              direction: key.direction,
+            })),
+          },
+        });
+        
+        // Map existing corridors by key
+        const corridorMap = new Map<string, string>(); // keyStr -> corridorId
+        for (const corridor of existingCorridors) {
+          const keyStr = `${corridor.aH3}_${corridor.bH3}_${corridor.direction}`;
+          corridorMap.set(keyStr, corridor.id);
+        }
+        
+        // Create missing corridors in batch
+        const missingKeys = Array.from(uniqueKeys.entries())
+          .filter(([keyStr]) => !corridorMap.has(keyStr));
+        
+        if (missingKeys.length > 0) {
+          const newCorridors = await prisma.$transaction(
+            missingKeys.map(([_, key]) =>
+              prisma.corridor.create({
+                data: {
+                  aH3: key.aH3,
+                  bH3: key.bH3,
+                  direction: key.direction,
+                },
+              })
+            )
+          );
           
-          // Store traversal
-          await prisma.traversal.create({
-            data: {
-              corridorId: corridor.id,
-              tripId: trip.id,
-              startTs: traversalData.startTs,
-              endTs: traversalData.endTs,
-              travelSec: traversalData.travelSec,
-              avgSpeedKmh: traversalData.avgSpeedKmh,
-              startLat: traversalData.startLat,
-              startLon: traversalData.startLon,
-              endLat: traversalData.endLat,
-              endLon: traversalData.endLon,
-            },
-          });
+          // Add new corridors to map
+          for (let i = 0; i < newCorridors.length; i++) {
+            const corridor = newCorridors[i];
+            const keyStr = missingKeys[i][0];
+            corridorMap.set(keyStr, corridor.id);
+          }
+        }
+        
+        // Batch create traversals
+        const traversalData = allTraversals.map(traversal => {
+          const { corridorKey, ...data } = traversal;
+          const keyStr = `${corridorKey.aH3}_${corridorKey.bH3}_${corridorKey.direction}`;
+          const corridorId = corridorMap.get(keyStr)!;
           
-          // Update corridor baselines (async job - could be queued)
-          await updateCorridorBaselines(corridor.id);
-          
-          // Check for alerts
-          await checkAndCreateAlerts({
-            corridorId: corridor.id,
+          return {
+            corridorId,
             tripId: trip.id,
-            vehicleId: vehicle.id,
-            travelSec: traversalData.travelSec,
-            avgSpeedKmh: traversalData.avgSpeedKmh,
-            timestamp: traversalData.startTs,
+            startTs: data.startTs,
+            endTs: data.endTs,
+            travelSec: data.travelSec,
+            avgSpeedKmh: data.avgSpeedKmh,
+            startLat: data.startLat,
+            startLon: data.startLon,
+            endLat: data.endLat,
+            endLon: data.endLon,
+          };
+        });
+        
+        if (traversalData.length > 0) {
+          await prisma.traversal.createMany({
+            data: traversalData,
           });
         }
+        
+        // DISABLED: Update baselines in batch later to prevent infinite loop
+        // TODO: Run baseline computation as a separate batch job after ingestion completes
+        
+        // DISABLED: Check alerts - will implement as batch job
+        // TODO: Run alert checking after baseline computation completes
         
         results.push({
           tripId: trip.id,
           vehicleId: vehicle.id,
           pointsProcessed: tripPoints.length,
           dropsDetected: drops.length,
-          corridorsTraversed: traversals.length,
+          corridorsTraversed: allTraversals.length,
         });
       }
     }
     
     return NextResponse.json({ ok: true, results });
   } catch (error) {
-    console.error('Ingestion error:', error);
+    console.error('[INGEST] ❌ Ingestion error:', error);
     
     if (error instanceof z.ZodError) {
+      console.error('[INGEST] Validation issues:', JSON.stringify(error.issues, null, 2));
       return NextResponse.json(
         { error: 'Validation error', details: error.issues },
         { status: 400 }
       );
     }
     
+    // Log full error details
+    if (error instanceof Error) {
+      console.error('[INGEST] Error message:', error.message);
+      console.error('[INGEST] Error stack:', error.stack);
+    }
+    
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { 
+        error: 'Internal server error',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      },
       { status: 500 }
     );
   }

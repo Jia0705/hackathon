@@ -93,9 +93,9 @@ export function detectDrops(
     const gapSec = (curr.ts.getTime() - prev.ts.getTime()) / 1000;
     
     if (gapSec > tauShort) {
-      const reason = gapSec <= tauShort * 1.5 ? 'micro_drop' 
-        : gapSec > 300 ? 'long_gap' 
-        : 'weak_signal';
+      const reason = gapSec > 600 ? 'long_gap'  // > 10 minutes
+        : gapSec <= tauShort * 1.2 ? 'micro_drop'  // < 72 seconds (slightly above threshold)
+        : 'weak_signal';  // 72s - 10min (normal signal loss)
       
       drops.push({
         startTs: prev.ts,
@@ -124,8 +124,8 @@ export function extractCorridors(
   const traversals: Traversal[] = [];
   
   for (const drop of drops) {
-    // Skip micro-drops for traversal learning (but count for instability)
-    if (drop.reason === 'micro_drop') continue;
+    // Skip long gaps (vehicle parked/inactive) but process weak_signal and micro_drops
+    if (drop.reason === 'long_gap') continue;
     
     const aH3 = latLngToCell(drop.startLat, drop.startLon, h3Resolution);
     const bH3 = latLngToCell(drop.endLat, drop.endLon, h3Resolution);
@@ -157,6 +157,79 @@ export function extractCorridors(
       startLon: drop.startLon,
       endLat: drop.endLat,
       endLon: drop.endLon,
+    });
+  }
+  
+  return traversals;
+}
+
+/**
+ * Extract corridors from all consecutive GPS points (not just drops)
+ * This captures normal vehicle movement through corridors
+ */
+export function extractCorridorsFromPoints(
+  points: GPSFix[],
+  h3Resolution: number = 7,
+  minTravelSec: number = 5, // Minimum 5 seconds to be a meaningful corridor
+  maxTravelSec: number = 600, // Maximum 10 minutes (otherwise likely parked/stopped)
+  minSpeedKmh: number = 1, // Must be moving (not stationary)
+  maxSpeedKmh: number = 150 // Reject unrealistic speeds
+): Traversal[] {
+  const traversals: Traversal[] = [];
+  
+  if (points.length < 2) return traversals;
+  
+  // Sort by timestamp
+  const sorted = [...points].sort((a, b) => a.ts.getTime() - b.ts.getTime());
+  
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = sorted[i - 1];
+    const curr = sorted[i];
+    
+    const travelSec = (curr.ts.getTime() - prev.ts.getTime()) / 1000;
+    
+    // Skip if too short or too long (likely a gap/parked)
+    if (travelSec < minTravelSec || travelSec > maxTravelSec) continue;
+    
+    const aH3 = latLngToCell(prev.lat, prev.lon, h3Resolution);
+    const bH3 = latLngToCell(curr.lat, curr.lon, h3Resolution);
+    
+    // Skip if same cell (no movement)
+    if (aH3 === bH3) continue;
+    
+    // Calculate bearing and bucket into 16 directions
+    const from = point([prev.lon, prev.lat]);
+    const to = point([curr.lon, curr.lat]);
+    const bearingDeg = bearing(from, to);
+    const normalizedBearing = (bearingDeg + 360) % 360;
+    const directionBucket = Math.floor(normalizedBearing / 22.5) % 16;
+    
+    // Calculate distance and average speed
+    const distanceKm = distance(from, to, { units: 'kilometers' });
+    const avgSpeedKmh = travelSec > 0 
+      ? (distanceKm / (travelSec / 3600))
+      : 0;
+    
+    // Filter out unrealistic speeds (stationary or too fast)
+    if (avgSpeedKmh < minSpeedKmh || avgSpeedKmh > maxSpeedKmh) continue;
+    
+    // Filter out very short distances (GPS jitter)
+    if (distanceKm < 0.01) continue; // Less than 10 meters
+    
+    traversals.push({
+      corridorKey: {
+        aH3,
+        bH3,
+        direction: directionBucket,
+      },
+      startTs: prev.ts,
+      endTs: curr.ts,
+      travelSec,
+      avgSpeedKmh,
+      startLat: prev.lat,
+      startLon: prev.lon,
+      endLat: curr.lat,
+      endLon: curr.lon,
     });
   }
   

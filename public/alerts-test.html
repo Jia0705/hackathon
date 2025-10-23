@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alerts Stream Test</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 { margin-top: 0; color: #333; }
+        .status {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: bold;
+            display: inline-block;
+            margin-bottom: 16px;
+        }
+        .connected { background: #10b981; color: white; }
+        .disconnected { background: #ef4444; color: white; }
+        .alert-item {
+            background: #f9fafb;
+            border-left: 4px solid #3b82f6;
+            padding: 12px;
+            margin: 8px 0;
+            border-radius: 4px;
+        }
+        .alert-high { border-left-color: #ef4444; }
+        .alert-medium { border-left-color: #f59e0b; }
+        .alert-low { border-left-color: #10b981; }
+        .log {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 16px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <h1>🚨 Live Alerts Stream Test</h1>
+    
+    <div class="card">
+        <div class="status disconnected" id="status">DISCONNECTED</div>
+        <div><strong>Total Alerts Received:</strong> <span id="count">0</span></div>
+        <div><strong>Last Alert:</strong> <span id="lastAlert">None</span></div>
+    </div>
+
+    <div class="card">
+        <h2>Recent Alerts</h2>
+        <div id="alerts">
+            <p style="color: #999;">No alerts yet. Waiting for alerts...</p>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Raw Event Log</h2>
+        <div class="log" id="log"></div>
+    </div>
+
+    <script>
+        let eventSource;
+        let alertCount = 0;
+        let logContent = [];
+
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            logContent.push(`[${timestamp}] ${message}`);
+            if (logContent.length > 100) logContent.shift();
+            document.getElementById('log').textContent = logContent.join('\n');
+            document.getElementById('log').scrollTop = document.getElementById('log').scrollHeight;
+        }
+
+        function connect() {
+            log('Connecting to /api/alerts/stream...');
+            
+            eventSource = new EventSource('/api/alerts/stream');
+            
+            eventSource.onopen = () => {
+                document.getElementById('status').className = 'status connected';
+                document.getElementById('status').textContent = 'CONNECTED';
+                log('✅ SSE connection established');
+            };
+            
+            eventSource.onmessage = (event) => {
+                log('📨 Message received: ' + event.data.substring(0, 100));
+                
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.type === 'connected') {
+                        log('✅ Initial connection message received');
+                        return;
+                    }
+                    
+                    // It's an alert
+                    alertCount++;
+                    document.getElementById('count').textContent = alertCount;
+                    document.getElementById('lastAlert').textContent = new Date(data.time).toLocaleTimeString();
+                    
+                    addAlertToUI(data);
+                    log(`🚨 Alert #${alertCount}: ${data.type.toUpperCase()} - ${data.vehicleName || data.vehicleId}`);
+                } catch (error) {
+                    log('❌ Error parsing message: ' + error.message);
+                }
+            };
+            
+            eventSource.onerror = (error) => {
+                document.getElementById('status').className = 'status disconnected';
+                document.getElementById('status').textContent = 'DISCONNECTED';
+                log('❌ Connection error. Will retry in 3 seconds...');
+                
+                eventSource.close();
+                setTimeout(connect, 3000);
+            };
+        }
+
+        function addAlertToUI(alert) {
+            const container = document.getElementById('alerts');
+            
+            // Clear "no alerts" message
+            if (alertCount === 1) {
+                container.innerHTML = '';
+            }
+            
+            const div = document.createElement('div');
+            div.className = `alert-item alert-${alert.severity}`;
+            div.innerHTML = `
+                <strong>${alert.type.toUpperCase()}</strong> - 
+                <span style="color: #666;">${new Date(alert.time).toLocaleTimeString()}</span>
+                <br>
+                <small>
+                    Vehicle: ${alert.vehicleName || alert.vehicleId}<br>
+                    Corridor: ${alert.aH3?.substring(0, 8)}... → ${alert.bH3?.substring(0, 8)}...<br>
+                    Delta: ${alert.deltaValue} | Severity: ${alert.severity}
+                </small>
+            `;
+            
+            container.insertBefore(div, container.firstChild);
+            
+            // Keep only last 20 alerts
+            while (container.children.length > 20) {
+                container.removeChild(container.lastChild);
+            }
+        }
+
+        // Connect on page load
+        connect();
+        log('🚀 Test page loaded');
+    </script>
+</body>
+</html>

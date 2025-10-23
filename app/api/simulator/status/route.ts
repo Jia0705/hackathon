@@ -21,5 +21,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, message: 'Simulator stopped' });
   }
   
+  if (action === 'reset') {
+    simulator.forceReset();
+    return NextResponse.json({ ok: true, message: 'Simulator reset' });
+  }
+  
   return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
 }

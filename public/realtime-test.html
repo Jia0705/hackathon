@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time GPS Simulator</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 1000px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 { margin-top: 0; color: #333; }
+        h2 { color: #555; font-size: 18px; margin-top: 0; }
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-right: 10px;
+            transition: all 0.2s;
+            margin-bottom: 10px;
+        }
+        .btn-primary { background: #3b82f6; color: white; }
+        .btn-primary:hover { background: #2563eb; }
+        .btn-success { background: #10b981; color: white; }
+        .btn-success:hover { background: #059669; }
+        .btn-danger { background: #ef4444; color: white; }
+        .btn-danger:hover { background: #dc2626; }
+        .btn-secondary { background: #6b7280; color: white; }
+        .btn-secondary:hover { background: #4b5563; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .log {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 16px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            margin: 16px 0;
+        }
+        .stat {
+            background: #f9fafb;
+            padding: 12px;
+            border-radius: 6px;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #3b82f6;
+        }
+        .stat-label {
+            font-size: 12px;
+            color: #6b7280;
+            margin-top: 4px;
+        }
+        .vehicle {
+            display: inline-block;
+            background: #e0f2fe;
+            padding: 6px 12px;
+            border-radius: 16px;
+            margin: 4px;
+            font-size: 13px;
+        }
+        .vehicle.active { background: #10b981; color: white; }
+        input[type="number"] {
+            padding: 8px;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            width: 80px;
+        }
+        .success { color: #10b981; }
+        .error { color: #ef4444; }
+        .warning { color: #f59e0b; }
+    </style>
+</head>
+<body>
+    <h1>🚀 Real-Time GPS Simulator</h1>
+    <p>Send live GPS data to your system and watch it appear on the dashboard!</p>
+    
+    <div class="card">
+        <h2>🎮 Quick Actions</h2>
+        <button class="btn-success" onclick="startSingleVehicle()" id="btnSingle">
+            📍 Start Single Vehicle
+        </button>
+        <button class="btn-primary" onclick="startMultiVehicle()" id="btnMulti">
+            🚗 Start 5 Vehicles
+        </button>
+        <button class="btn-danger" onclick="stopAll()" id="btnStop" disabled>
+            ⏹️ Stop All
+        </button>
+        <button class="btn-secondary" onclick="window.open('/')">
+            📊 Open Dashboard
+        </button>
+        
+        <div style="margin-top: 16px;">
+            <label>Update Interval (seconds): 
+                <input type="number" id="interval" value="3" min="1" max="60">
+            </label>
+            <label style="margin-left: 16px;">Speed Variation: 
+                <input type="number" id="speedVar" value="20" min="0" max="50"> km/h
+            </label>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>📊 Live Stats</h2>
+        <div class="stats" id="stats">
+            <div class="stat">
+                <div class="stat-value" id="statPoints">0</div>
+                <div class="stat-label">Points Sent</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="statVehicles">0</div>
+                <div class="stat-label">Active Vehicles</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="statDB">-</div>
+                <div class="stat-label">DB GPS Points</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="statCorridors">-</div>
+                <div class="stat-label">DB Corridors</div>
+            </div>
+        </div>
+        
+        <div id="vehicles" style="margin-top: 16px;"></div>
+    </div>
+
+    <div class="card">
+        <h2>📝 Activity Log</h2>
+        <div class="log" id="log"></div>
+    </div>
+
+    <script>
+        let logContent = [];
+        let vehicles = [];
+        let pointsSent = 0;
+
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const className = type === 'error' ? 'error' : type === 'success' ? 'success' : type === 'warning' ? 'warning' : '';
+            logContent.push(`[${timestamp}] ${message}`);
+            if (logContent.length > 100) logContent.shift();
+            document.getElementById('log').innerHTML = logContent.map((line, i) => {
+                const isLast = i === logContent.length - 1;
+                return `<div class="${isLast ? className : ''}">${line}</div>`;
+            }).join('');
+            document.getElementById('log').scrollTop = document.getElementById('log').scrollHeight;
+        }
+
+        class Vehicle {
+            constructor(id) {
+                this.id = id;
+                this.lat = 5.4343 + (Math.random() - 0.5) * 0.1;
+                this.lon = 100.5948 + (Math.random() - 0.5) * 0.1;
+                this.speed = 40 + Math.random() * 30;
+                this.active = false;
+                this.interval = null;
+                this.pointsSent = 0;
+            }
+
+            async sendUpdate() {
+                // Simulate realistic movement
+                const moveDistance = 0.001; // ~100m
+                const angle = Math.random() * Math.PI * 2;
+                this.lat += Math.cos(angle) * moveDistance;
+                this.lon += Math.sin(angle) * moveDistance;
+                
+                const speedVar = parseInt(document.getElementById('speedVar').value || 20);
+                this.speed = 40 + Math.random() * speedVar;
+
+                const point = {
+                    vehicleId: this.id,
+                    ts: new Date().toISOString(),
+                    lat: this.lat,
+                    lon: this.lon,
+                    speed: this.speed,
+                    accuracy: 5 + Math.random() * 10,
+                    heading: Math.random() * 360
+                };
+
+                try {
+                    const response = await fetch('/api/ingest', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(point)
+                    });
+
+                    if (response.ok) {
+                        this.pointsSent++;
+                        pointsSent++;
+                        document.getElementById('statPoints').textContent = pointsSent;
+                        log(`✅ ${this.id}: Point sent (${this.speed.toFixed(1)} km/h)`, 'success');
+                    } else {
+                        log(`❌ ${this.id}: Failed to send`, 'error');
+                    }
+                } catch (error) {
+                    log(`❌ ${this.id}: Error - ${error.message}`, 'error');
+                }
+            }
+
+            start() {
+                if (this.active) return;
+                this.active = true;
+                const intervalSec = parseInt(document.getElementById('interval').value || 3);
+                this.interval = setInterval(() => this.sendUpdate(), intervalSec * 1000);
+                this.sendUpdate(); // Send first point immediately
+                log(`🚀 ${this.id}: Started (updating every ${intervalSec}s)`);
+                updateVehicleDisplay();
+                updateActiveCount();
+            }
+
+            stop() {
+                if (!this.active) return;
+                this.active = false;
+                clearInterval(this.interval);
+                log(`⏹️ ${this.id}: Stopped (${this.pointsSent} points sent)`);
+                updateVehicleDisplay();
+                updateActiveCount();
+            }
+        }
+
+        function startSingleVehicle() {
+            const vehicle = new Vehicle(`TRUCK_${vehicles.length + 1}`);
+            vehicles.push(vehicle);
+            vehicle.start();
+            document.getElementById('btnStop').disabled = false;
+        }
+
+        function startMultiVehicle() {
+            for (let i = 0; i < 5; i++) {
+                const vehicle = new Vehicle(`VEHICLE_${vehicles.length + 1}`);
+                vehicles.push(vehicle);
+                setTimeout(() => vehicle.start(), i * 500); // Stagger starts
+            }
+            document.getElementById('btnStop').disabled = false;
+        }
+
+        function stopAll() {
+            vehicles.forEach(v => v.stop());
+            log('⏹️ All vehicles stopped');
+            document.getElementById('btnStop').disabled = true;
+        }
+
+        function updateVehicleDisplay() {
+            const html = vehicles.map(v => 
+                `<span class="vehicle ${v.active ? 'active' : ''}">${v.id} (${v.pointsSent})</span>`
+            ).join('');
+            document.getElementById('vehicles').innerHTML = html || '<span style="color: #999;">No vehicles yet</span>';
+        }
+
+        function updateActiveCount() {
+            const active = vehicles.filter(v => v.active).length;
+            document.getElementById('statVehicles').textContent = active;
+        }
+
+        async function updateDBStats() {
+            try {
+                const response = await fetch('/api/db/stats');
+                const data = await response.json();
+                document.getElementById('statDB').textContent = data.stats.gpsPoints.toLocaleString();
+                document.getElementById('statCorridors').textContent = data.stats.corridors;
+            } catch (error) {
+                // Ignore errors
+            }
+        }
+
+        // Update DB stats every 5 seconds
+        setInterval(updateDBStats, 5000);
+        updateDBStats();
+
+        log('🚀 Real-Time GPS Simulator ready');
+        log('💡 Click "Start Single Vehicle" to begin');
+        log('💡 Open Dashboard in another tab to see results');
+    </script>
+</body>
+</html>

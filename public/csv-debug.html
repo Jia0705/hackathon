@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSV Debug - Data Driven Solution</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        h1, h2 {
+            color: #333;
+            margin-bottom: 16px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .stat-box {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 32px;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        .stat-label {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .warning {
+            background: #ef4444 !important;
+        }
+
+        .success {
+            background: #10b981 !important;
+        }
+
+        .btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 12px;
+            margin-bottom: 12px;
+            transition: opacity 0.2s;
+        }
+
+        .btn:hover {
+            opacity: 0.9;
+        }
+
+        .btn-danger {
+            background: #ef4444;
+        }
+
+        .btn-success {
+            background: #10b981;
+        }
+
+        .log-container {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 16px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+            margin-top: 16px;
+        }
+
+        .log-entry {
+            margin-bottom: 4px;
+            padding: 4px;
+            border-radius: 4px;
+        }
+
+        .log-error {
+            background: rgba(239, 68, 68, 0.2);
+            color: #fca5a5;
+        }
+
+        .log-success {
+            background: rgba(16, 185, 129, 0.2);
+            color: #86efac;
+        }
+
+        .log-info {
+            color: #93c5fd;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 24px;
+            background: #e5e7eb;
+            border-radius: 12px;
+            overflow: hidden;
+            margin: 16px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .file-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 8px;
+            margin-top: 16px;
+        }
+
+        .file-item {
+            padding: 8px;
+            background: #f3f4f6;
+            border-radius: 6px;
+            font-size: 12px;
+            text-align: center;
+        }
+
+        .file-item.selected {
+            background: #667eea;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h1>🚗 CSV Data Driven Solution - Debug Console</h1>
+            <p style="color: #666; margin-bottom: 20px;">
+                Testing CSV data ingestion pipeline with real dataset files
+            </p>
+        </div>
+
+        <div class="card">
+            <h2>📊 Database Statistics</h2>
+            <div class="stats-grid" id="stats">
+                <div class="stat-box">
+                    <div class="stat-value" id="vehicles">-</div>
+                    <div class="stat-label">Vehicles</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="trips">-</div>
+                    <div class="stat-label">Trips</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="gpsPoints">-</div>
+                    <div class="stat-label">GPS Points</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="drops">-</div>
+                    <div class="stat-label">Drops Detected</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="corridors">-</div>
+                    <div class="stat-label">Corridors</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="alerts">-</div>
+                    <div class="stat-label">Alerts</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>🧪 Quick Tests</h2>
+            <button class="btn" onclick="testDatabaseWrite()">🔧 Test DB Write</button>
+            <button class="btn" onclick="testAlert()">🚨 Test Alert</button>
+            <button class="btn" onclick="testHeatmap()">🗺️ Test Heatmap</button>
+            <button class="btn" onclick="testSinglePoint()">Test Single GPS Point</button>
+            <button class="btn btn-success" onclick="ingestOneFile()">Ingest 1 CSV File (Fast)</button>
+            <button class="btn btn-success" onclick="ingestThreeFiles()">Ingest 3 CSV Files</button>
+            <button class="btn" onclick="computeBaselines()">📊 Compute Baselines</button>
+            <button class="btn" onclick="computeAlerts()">⚠️ Check Alerts</button>
+            <button class="btn btn-danger" onclick="resetDatabase()">Reset Database</button>
+            <button class="btn" onclick="checkEnvironment()">Check Environment</button>
+            <button class="btn" onclick="runDiagnostic()">Full Diagnostic</button>
+        </div>
+
+        <div class="card">
+            <h2>📁 Available CSV Files</h2>
+            <div id="fileList" class="file-list">Loading...</div>
+        </div>
+
+        <div class="card">
+            <h2>📝 Activity Log</h2>
+            <div id="log" class="log-container">
+                <div class="log-entry log-info">Ready to test CSV data ingestion...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let refreshInterval;
+
+        function log(message, type = 'info') {
+            const logContainer = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logContainer.appendChild(entry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        async function testDatabaseWrite() {
+            log('🔧 Testing direct database write...', 'info');
+            
+            try {
+                const response = await fetch('/api/test/db-write');
+                const data = await response.json();
+                
+                if (data.success) {
+                    log('✅ Database write test PASSED!', 'success');
+                    log(`Vehicle ID: ${data.vehicleId}`, 'info');
+                    log(`Trip ID: ${data.tripId}`, 'info');
+                    log(`GPS Points Inserted: ${data.gpsPointsInserted}`, 'success');
+                    log(`GPS Points Found: ${data.gpsPointsFound}`, 'success');
+                    log(`Total DB GPS Points: ${data.counts.gpsPoints}`, 'info');
+                    
+                    if (data.gpsPointsInserted !== data.gpsPointsFound) {
+                        log('⚠️ WARNING: Inserted count != Found count!', 'error');
+                    }
+                } else {
+                    log('❌ Database write test FAILED!', 'error');
+                    log('Error: ' + data.error, 'error');
+                    if (data.stack) {
+                        log('Stack: ' + data.stack, 'error');
+                    }
+                }
+                
+                await updateStats();
+            } catch (error) {
+                log('❌ Test error: ' + error.message, 'error');
+            }
+        }
+
+        async function testAlert() {
+            log('🚨 Creating test alert...', 'info');
+            
+            try {
+                const response = await fetch('/api/test/alert');
+                const data = await response.json();
+                
+                if (data.success) {
+                    log('✅ Test alert created and sent to alerts panel!', 'success');
+                    log('Alert ID: ' + data.alert.id, 'info');
+                    log('Type: ' + data.alert.type, 'info');
+                    log('Severity: ' + data.alert.severity, 'info');
+                    log('Check the dashboard alerts panel → ', 'success');
+                } else {
+                    log('❌ Test alert failed: ' + data.error, 'error');
+                }
+                
+                await updateStats();
+            } catch (error) {
+                log('❌ Error: ' + error.message, 'error');
+            }
+        }
+
+        async function updateStats() {
+            try {
+                const response = await fetch('/api/db/stats');
+                const data = await response.json();
+                
+                document.getElementById('vehicles').textContent = data.vehicles || 0;
+                document.getElementById('trips').textContent = data.trips || 0;
+                document.getElementById('gpsPoints').textContent = data.gpsPoints || 0;
+                document.getElementById('drops').textContent = data.drops || 0;
+                document.getElementById('corridors').textContent = data.corridors || 0;
+                document.getElementById('alerts').textContent = data.alerts || 0;
+
+                // Highlight warnings
+                const gpsBox = document.getElementById('gpsPoints').parentElement;
+                const dropsBox = document.getElementById('drops').parentElement;
+                const corridorsBox = document.getElementById('corridors').parentElement;
+
+                gpsBox.classList.toggle('warning', data.gpsPoints === 0 && data.trips > 0);
+                dropsBox.classList.toggle('warning', data.drops === 0 && data.gpsPoints > 0);
+                corridorsBox.classList.toggle('warning', data.corridors === 0 && data.drops > 0);
+
+                gpsBox.classList.toggle('success', data.gpsPoints > 0);
+                dropsBox.classList.toggle('success', data.drops > 0);
+                corridorsBox.classList.toggle('success', data.corridors > 0);
+
+            } catch (error) {
+                log('Failed to fetch stats: ' + error.message, 'error');
+            }
+        }
+
+        async function testSinglePoint() {
+            log('Testing single GPS point ingestion...', 'info');
+            
+            try {
+                const testPoint = {
+                    vehicleId: 'TEST_VEHICLE',
+                    ts: new Date().toISOString(),
+                    lat: 3.1390,
+                    lon: 101.6869,
+                    speed: 45,
+                    accuracy: 5
+                };
+
+                const response = await fetch('/api/ingest', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(testPoint)
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    log('✅ Single point ingested successfully', 'success');
+                    log('Response: ' + JSON.stringify(result), 'info');
+                } else {
+                    const error = await response.text();
+                    log('❌ Ingest failed: ' + error, 'error');
+                }
+
+                await updateStats();
+            } catch (error) {
+                log('❌ Error: ' + error.message, 'error');
+            }
+        }
+
+        async function ingestOneFile() {
+            log('Starting ingestion of 1 CSV file (fast mode)...', 'info');
+            
+            try {
+                const response = await fetch('/api/simulator/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        files: ['ABA 0048.csv'],
+                        speed: 1000, // Fast
+                        skipDelays: true
+                    })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    log('✅ Simulator started: ' + JSON.stringify(result), 'success');
+                    startMonitoring();
+                } else {
+                    const errorText = await response.text();
+                    log('❌ Failed to start simulator: ' + errorText, 'error');
+                }
+            } catch (error) {
+                log('❌ Error: ' + error.message, 'error');
+            }
+        }
+
+        async function ingestThreeFiles() {
+            log('Starting ingestion of 3 CSV files (fast mode)...', 'info');
+            
+            try {
+                const response = await fetch('/api/simulator/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        files: ['ABA 0048.csv', 'ABA 0319.csv', 'ABA 0557.csv'],
+                        speed: 1000,
+                        skipDelays: true
+                    })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    log('✅ Simulator started with 3 files: ' + JSON.stringify(result), 'success');
+                    startMonitoring();
+                } else {
+                    const errorText = await response.text();
+                    log('❌ Failed to start simulator: ' + errorText, 'error');
+                }
+            } catch (error) {
+                log('❌ Error: ' + error.message, 'error');
+            }
+        }
+
+        function startMonitoring() {
+            if (refreshInterval) clearInterval(refreshInterval);
+            refreshInterval = setInterval(async () => {
+                await updateStats();
+                
+                // Check if simulation is still running
+                try {
+                    const response = await fetch('/api/simulator/status');
+                    const status = await response.json();
+                    
+                    if (!status.isRunning && status.processedPoints > 0) {
+                        log('✅ Simulation completed!', 'success');
+                        log(`Processed ${status.processedPoints} points`, 'info');
+                        clearInterval(refreshInterval);
+                    }
+                } catch (e) {
+                    // Ignore
+                }
+            }, 2000);
+        }
+
+        async function resetDatabase() {
+            if (!confirm('Are you sure you want to reset the entire database?')) {
+                return;
+            }
+
+            log('Resetting database...', 'info');
+            
+            try {
+                const response = await fetch('/api/db/reset', { method: 'POST' });
+                if (response.ok) {
+                    log('✅ Database reset successful', 'success');
+                    await updateStats();
+                } else {
+                    log('❌ Reset failed', 'error');
+                }
+            } catch (error) {
+                log('❌ Error: ' + error.message, 'error');
+            }
+        }
+
+        async function checkEnvironment() {
+            log('Checking environment configuration...', 'info');
+            
+            try {
+                const response = await fetch('/api/diagnostic');
+                const data = await response.json();
+                
+                log('=== DIAGNOSTIC REPORT ===', 'info');
+                log(`Status: ${data.status}`, data.errors?.length > 0 ? 'error' : 'success');
+                
+                if (data.checks?.environment) {
+                    log('Environment:', 'info');
+                    log(`  TAU_SHORT: ${data.checks.environment.TAU_SHORT}`, 'info');
+                    log(`  H3_RESOLUTION: ${data.checks.environment.H3_RESOLUTION}`, 'info');
+                    log(`  DELAY_THRESHOLD: ${data.checks.environment.DELAY_THRESHOLD_MINUTES}`, 'info');
+                }
+                
+                if (data.checks?.database) {
+                    log(`Database: ${data.checks.database}`, 'info');
+                }
+                
+                if (data.checks?.datasetFiles) {
+                    log(`Dataset: ${data.checks.datasetFiles}`, 'info');
+                }
+                
+                if (data.checks?.databaseData) {
+                    log('Data Counts:', 'info');
+                    Object.entries(data.checks.databaseData).forEach(([key, value]) => {
+                        log(`  ${key}: ${value}`, 'info');
+                    });
+                }
+                
+                if (data.warnings && data.warnings.length > 0) {
+                    log('⚠️ Warnings:', 'error');
+                    data.warnings.forEach(w => log(`  - ${w}`, 'error'));
+                }
+                
+                if (data.errors && data.errors.length > 0) {
+                    log('❌ Errors:', 'error');
+                    data.errors.forEach(e => log(`  - ${e}`, 'error'));
+                }
+            } catch (error) {
+                log('❌ Error: ' + error.message, 'error');
+            }
+        }
+
+        async function testHeatmap() {
+            log('🗺️ Testing heatmap data...', 'info');
+            
+            try {
+                const response = await fetch('/api/test/heatmap');
+                const data = await response.json();
+                
+                log(`Drops in DB: ${data.dropCount}`, 'info');
+                log(`Traversals in DB: ${data.traversalCount}`, 'info');
+                
+                if (data.h3Test) {
+                    if (data.h3Test.success) {
+                        log(`✅ H3 Conversion working!`, 'success');
+                        log(`  Input: ${data.h3Test.inputLat}, ${data.h3Test.inputLon}`, 'info');
+                        log(`  H3 Cell: ${data.h3Test.h3Cell}`, 'info');
+                        log(`  Boundary: ${data.h3Test.boundaryPoints} points`, 'info');
+                        log('Now check the actual heatmap API...', 'info');
+                        
+                        // Test actual heatmap API
+                        const heatmapResp = await fetch('/api/heatmap?h3res=7');
+                        const heatmapData = await heatmapResp.json();
+                        log(`Heatmap API returned: ${heatmapData.features?.length || 0} features`, 
+                            heatmapData.features?.length > 0 ? 'success' : 'error');
+                    } else {
+                        log(`❌ H3 Conversion FAILED: ${data.h3Test.error}`, 'error');
+                    }
+                }
+                
+                if (data.sampleDrops && data.sampleDrops.length > 0) {
+                    log(`Sample drop: (${data.sampleDrops[0].startLat}, ${data.sampleDrops[0].startLon})`, 'info');
+                }
+            } catch (error) {
+                log('❌ Error: ' + error.message, 'error');
+            }
+        }
+
+        async function computeBaselines() {
+            log('📊 Computing corridor baselines...', 'info');
+            
+            try {
+                const response = await fetch('/api/compute/baselines', { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.ok) {
+                    log(`✅ Baselines computed!`, 'success');
+                    log(`Processed: ${data.processed}/${data.total} corridors`, 'info');
+                    if (data.errors > 0) {
+                        log(`⚠️ Errors: ${data.errors}`, 'error');
+                    }
+                } else {
+                    log('❌ Failed: ' + data.error, 'error');
+                }
+                
+                await updateStats();
+            } catch (error) {
+                log('❌ Error: ' + error.message, 'error');
+            }
+        }
+
+        async function computeAlerts() {
+            log('⚠️ Checking for alerts...', 'info');
+            
+            try {
+                const response = await fetch('/api/compute/alerts', { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.ok) {
+                    log(`✅ Alert checking complete!`, 'success');
+                    log(`Checked: ${data.checked} traversals`, 'info');
+                    log(`Alerts created: ${data.alertsCreated}`, data.alertsCreated > 0 ? 'success' : 'info');
+                    if (data.errors > 0) {
+                        log(`⚠️ Errors: ${data.errors}`, 'error');
+                    }
+                } else {
+                    log('❌ Failed: ' + data.error, 'error');
+                }
+                
+                await updateStats();
+            } catch (error) {
+                log('❌ Error: ' + error.message, 'error');
+            }
+        }
+
+        async function runDiagnostic() {
+            log('Running full diagnostic...', 'info');
+            
+            try {
+                const response = await fetch('/api/diagnostic');
+                const data = await response.json();
+                
+                log('=== DIAGNOSTIC REPORT ===', 'info');
+                log(JSON.stringify(data, null, 2), 'info');
+            } catch (error) {
+                log('❌ Error: ' + error.message, 'error');
+            }
+        }
+
+        async function loadFileList() {
+            try {
+                const response = await fetch('/api/simulator/files');
+                const data = await response.json();
+                
+                const fileList = document.getElementById('fileList');
+                fileList.innerHTML = data.files.map(file => 
+                    `<div class="file-item">${file}</div>`
+                ).join('');
+                
+                log(`Found ${data.files.length} CSV files`, 'info');
+            } catch (error) {
+                log('Failed to load file list', 'error');
+            }
+        }
+
+        // Initialize
+        updateStats();
+        loadFileList();
+        setInterval(updateStats, 5000);
+    </script>
+</body>
+</html>

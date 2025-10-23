@@ -42,9 +42,9 @@ export async function GET(request: NextRequest) {
     
     // Calculate live deviations
     const enrichedCorridors = corridors
-      .filter(c => c._count.traversals > 0) // Only corridors with data in time window
-      .map(corridor => {
-        const globalStats = corridor.stats.find(s => s.bucketHour === -1);
+      .filter((c: any) => c._count.traversals > 0) // Only corridors with data in time window
+      .map((corridor: any) => {
+        const globalStats = corridor.stats.find((s: any) => s.bucketHour === -1);
         const lastTraversal = corridor.traversals[0];
         
         let deviationSec = 0;
@@ -72,10 +72,23 @@ export async function GET(request: NextRequest) {
           deviationFormatted: deviationSec !== 0 ? formatDuration(Math.abs(deviationSec)) : null,
           deviationSign: deviationSec > 0 ? '+' : deviationSec < 0 ? '-' : '',
         };
+      })
+      .filter((c: any) => {
+        // Filter out extreme outliers
+        // Reject if median time is unrealistic (< 1 sec or > 1 hour)
+        if (c.medianSec > 0 && (c.medianSec < 1 || c.medianSec > 3600)) return false;
+        
+        // Reject if speed is unrealistic (> 200 km/h)
+        if (c.p95SpeedKmh > 200) return false;
+        
+        // Require at least 3 traversals for statistical significance
+        if (c.count < 3) return false;
+        
+        return true;
       });
     
     // Sort
-    const sorted = enrichedCorridors.sort((a, b) => {
+    const sorted = enrichedCorridors.sort((a: any, b: any) => {
       switch (sort) {
         case 'deviation':
           return Math.abs(b.deviationSec) - Math.abs(a.deviationSec);
