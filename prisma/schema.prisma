@@ -1,0 +1,138 @@
+// Prisma schema for GPS Stability & Corridor Intelligence
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Vehicle {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  meta      String?  // JSON metadata
+  createdAt DateTime @default(now())
+  
+  trips     Trip[]
+  alerts    Alert[]
+}
+
+model Trip {
+  id         String      @id @default(cuid())
+  vehicleId  String
+  vehicle    Vehicle     @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  startTime  DateTime
+  endTime    DateTime?
+  source     String?     // CSV filename or source identifier
+  
+  points     GPSPoint[]
+  drops      Drop[]
+  traversals Traversal[]
+  alerts     Alert[]
+  
+  @@index([vehicleId, startTime])
+  @@index([startTime])
+}
+
+model GPSPoint {
+  id        String   @id @default(cuid())
+  tripId    String
+  trip      Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  ts        DateTime
+  lat       Float
+  lon       Float
+  speed     Float?   // km/h if available
+  accuracy  Float?   // meters if available
+  heading   Float?   // degrees if available
+  rawMeta   String?  // JSON for other fields
+  
+  @@index([tripId, ts])
+  @@index([ts])
+}
+
+model Drop {
+  id         String   @id @default(cuid())
+  tripId     String
+  trip       Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  startTs    DateTime
+  endTs      DateTime
+  startLat   Float
+  startLon   Float
+  endLat     Float
+  endLon     Float
+  durationSec Int
+  reason     String?  // 'weak_signal', 'long_gap', 'micro_drop'
+  
+  @@index([tripId, startTs])
+}
+
+model Corridor {
+  id        String   @id @default(cuid())
+  aH3       String   // H3 hex of point A (last strong fix)
+  bH3       String   // H3 hex of point B (next strong fix)
+  direction Int      // 0-15 (16-way bearing bucket, 22.5° each)
+  createdAt DateTime @default(now())
+  
+  stats      CorridorStats[]
+  traversals Traversal[]
+  alerts     Alert[]
+  
+  @@unique([aH3, bH3, direction])
+  @@index([aH3])
+  @@index([bH3])
+}
+
+model CorridorStats {
+  id            String   @id @default(cuid())
+  corridorId    String
+  corridor      Corridor @relation(fields: [corridorId], references: [id], onDelete: Cascade)
+  bucketHour    Int      // 0-23 hour of day, or -1 for global
+  count         Int
+  medianTravelSec Int
+  p95SpeedKmh   Float
+  updatedAt     DateTime @updatedAt
+  
+  @@unique([corridorId, bucketHour])
+  @@index([corridorId])
+}
+
+model Traversal {
+  id          String   @id @default(cuid())
+  corridorId  String
+  corridor    Corridor @relation(fields: [corridorId], references: [id], onDelete: Cascade)
+  tripId      String
+  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  startTs     DateTime
+  endTs       DateTime
+  travelSec   Int
+  avgSpeedKmh Float
+  startLat    Float
+  startLon    Float
+  endLat      Float
+  endLon      Float
+  
+  @@index([corridorId, startTs])
+  @@index([tripId])
+}
+
+model Alert {
+  id         String    @id @default(cuid())
+  type       String    // 'delay' | 'overspeed'
+  corridorId String
+  corridor   Corridor  @relation(fields: [corridorId], references: [id], onDelete: Cascade)
+  tripId     String
+  trip       Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  vehicleId  String
+  vehicle    Vehicle   @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  severity   String    // 'low' | 'medium' | 'high'
+  deltaValue Float     // delay in seconds or speed difference in km/h
+  details    String?   // JSON with additional context
+  createdAt  DateTime  @default(now())
+  resolvedAt DateTime?
+  
+  @@index([createdAt])
+  @@index([corridorId, tripId])
+  @@index([vehicleId])
+}

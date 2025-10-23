@@ -81,7 +81,7 @@ Notes:
 │ - Legend (Instability)      │                 MAP (MapLibre)                 │
 │ - Layer Toggles:            │     [H3 Heatmap polygons, corridor overlays]   │
 │   [x] H3 Heatmap            │                                                 │
-│   [ ] Corridors             │                                                 │
+│   [ ] Corridors: [Top by count] [Recent traversals]                           │
 │ - Hex Res: [7 ▼]            │                                                 │
 │ - Instability Min: [0.2]    │                                                 │
 │ - Basemap: [OSM ▼]          │                                                 │
@@ -209,7 +209,7 @@ Interactions:
 ## Interaction details & states
 
 - Map interactions:
-  - Click hex -> tooltip: short/long counts, instability score, traversals
+  - Click hex -> tooltip: short/long counts, instability score, traversals; action: "Filter corridors touching this hex"
   - Toggle layers (heatmap/corridors) to reduce clutter
   - Zoom-to-fit on alert/corridor selection
 

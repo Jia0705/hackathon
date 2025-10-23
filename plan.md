@@ -75,13 +75,13 @@ Retention (hackathon): keep all data. Optional pruning of old GPSPoints.
 
 2) Drop detection
 - For each trip, track time since last strong fix A
-- If gap > 60s, mark a drop until next strong fix B
-- If gap ≤ 60s, count as micro-drop (no alert), contributes to stability score
+ - Prefer gpsLocated=false to mark weak periods; otherwise infer a drop when gap > 2× the trip’s modal sampling interval
+ - If gap ≤ 60s (τ_short), treat as a micro-drop (no alert) and contribute to the stability score
 
 3) Corridor identification
 - A = last strong fix; B = next strong fix
-- corridorKey = [H3(A,res7~8), H3(B,res7~8), direction]
-- direction: bearing bucket (e.g., 8-way quantization via turf.bearing)
+ - corridorKey = [H3(A,7), H3(B,7), direction]
+ - direction: bearing bucket (16-way, every 22.5°, via turf.bearing)
 - Traversal: travelSec = tB - tA; distance = turf.distance(A,B); avgSpeedKmh = distance_km / (travelSec/3600)
 
 4) Baseline computation (per corridor)
@@ -116,6 +116,7 @@ Retention (hackathon): keep all data. Optional pruning of old GPSPoints.
 
 - GET `/api/alerts/stream`
   - SSE events: { id, type, time, corridorId, tripId, vehicleId, severity, details }
+  - Supports Last-Event-ID to resume missed alerts on reconnect
 
 ---
 
@@ -136,7 +137,7 @@ Retention (hackathon): keep all data. Optional pruning of old GPSPoints.
 
 ## 7) UI plan
 
-- Map screen: MapLibre heatmap (H3 instability), corridor overlays, filters (time window, thresholds, vehicles), right-side alerts panel
+ - Map screen: MapLibre heatmap (H3 instability), corridor overlays (top corridors by count and last N traversals), filters (time window, thresholds, vehicles), right-side alerts panel
 - Corridors list: sortable table with A→B label, count, median T, P95 speed, live deviation, last seen
 - Alerts panel: live SSE feed; click-to-zoom to A/B on map
 - Controls: τ_short (60s default), delay threshold (15m), overspeed sensitivity, time window, vehicle filters
@@ -156,10 +157,7 @@ Retention (hackathon): keep all data. Optional pruning of old GPSPoints.
 
 ## 9) Testing & quality gates
 
-- Happy path replay: at least one corridor + one alert
-- Edge cases: missing speed/accuracy, large gaps, duplicate timestamps
-- Performance: indexes on (tripId, ts) and corridorId; batch inserts
-- Build: PASS; Typecheck/Lint: PASS; Minimal unit tests for corridor extraction and median
+ Performance: indexes on (tripId, ts) and corridorId; batch inserts; target scope is all vehicles and full history—use batched ingestion, server-side aggregation, and response caching
 
 ---
 
