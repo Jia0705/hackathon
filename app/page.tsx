@@ -124,7 +124,7 @@ export default function Dashboard() {
       const timeParams = getTimeWindowParams(timeWindow);
       const params = new URLSearchParams({
         sort: 'deviation',
-        limit: '100',
+        limit: '1000', // Increased from 100 to show all corridors
         ...(timeParams as Record<string, string>),
       });
 
@@ -183,18 +183,20 @@ export default function Dashboard() {
   }
 
   function handleViewCorridor(corridor: Corridor) {
-    console.log('View corridor:', corridor);
+    console.log('[DASHBOARD] View corridor:', corridor.corridorId);
     
-    // Switch to map tab
-    setActiveTab('map');
-    
-    // Set selected corridor to highlight it
+    // Set selected corridor first
     setSelectedCorridor(corridor);
     
-    // Clear selection after 5 seconds
+    // Switch to map tab after a brief delay to ensure state is set
+    setTimeout(() => {
+      setActiveTab('map');
+    }, 50);
+    
+    // Keep selection active for longer (15 seconds instead of 5)
     setTimeout(() => {
       setSelectedCorridor(null);
-    }, 5000);
+    }, 15000);
   }
 
   function handleSimulationComplete() {
@@ -283,36 +285,38 @@ export default function Dashboard() {
                   onHexClick={handleHexClick}
                   onCorridorClick={handleViewCorridor}
                   center={[3.1390, 101.6869]}
-                  zoom={7}
+                  zoom={12}
                 />
               </div>
             </TabsContent>
             
-            <TabsContent value="corridors" className="flex-1 mt-4">
-              <CorridorsTable
-                corridors={corridors}
-                onViewCorridor={handleViewCorridor}
-                isLoading={isLoadingCorridors}
-              />
+            <TabsContent value="corridors" className="flex-1 mt-4 data-[state=active]:flex data-[state=active]:flex-col overflow-hidden">
+              <div className="h-full overflow-hidden">
+                <CorridorsTable
+                  corridors={corridors}
+                  onViewCorridor={handleViewCorridor}
+                  isLoading={isLoadingCorridors}
+                />
+              </div>
             </TabsContent>
           </Tabs>
         </div>
 
         {/* Right: Alerts Panel & Simulator */}
-        <div className="w-96 flex flex-col gap-4 p-4 border-l bg-muted/30 overflow-y-auto">
-          <div className="flex-shrink-0">
+        <div className="w-96 flex flex-col gap-4 p-4 border-l bg-muted/30 overflow-hidden">
+          {/* Database Stats - Fixed Height */}
+          <div className="flex-shrink-0 h-auto max-h-48 overflow-auto">
             <DebugPanel />
           </div>
           
-          <div className="flex-1 min-h-0">
+          {/* Alerts Panel - Fixed Height, Scrollable */}
+          <div className="flex-shrink-0 h-64 overflow-auto">
             <AlertsPanel onAlertClick={handleAlertClick} />
           </div>
           
-          <div className="flex-shrink-0">
-            <SimulatorControls 
-              onComplete={handleSimulationComplete}
-              onStart={handleSimulationStart}
-            />
+          {/* Simulator Controls - Fixed Height */}
+          <div className="flex-shrink-0 h-auto overflow-auto">
+            <SimulatorControls />
           </div>
         </div>
       </div>

@@ -88,9 +88,9 @@ export function CorridorsTable({ corridors, onViewCorridor, isLoading }: Corrido
   }
 
   return (
-    <div className="flex flex-col h-full bg-white rounded-lg shadow-lg">
+    <div className="flex flex-col h-full max-h-full bg-white rounded-lg shadow-lg overflow-hidden">
       {/* Header */}
-      <div className="p-4 border-b space-y-4">
+      <div className="p-4 border-b space-y-4 flex-shrink-0">
         <h2 className="text-lg font-semibold">Corridors</h2>
         
         <div className="flex gap-2">
@@ -115,7 +115,7 @@ export function CorridorsTable({ corridors, onViewCorridor, isLoading }: Corrido
       </div>
 
       {/* Table */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto min-h-0">
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-sm text-muted-foreground">Loading corridors...</div>
@@ -198,7 +198,7 @@ export function CorridorsTable({ corridors, onViewCorridor, isLoading }: Corrido
       </div>
 
       {/* Footer */}
-      <div className="p-4 border-t text-sm text-muted-foreground">
+      <div className="p-4 border-t text-sm text-muted-foreground flex-shrink-0">
         Showing {sortedCorridors.length} of {corridors.length} corridors
       </div>
     </div>

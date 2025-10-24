@@ -121,11 +121,16 @@ export function extractCorridors(
   drops: Drop[],
   h3Resolution: number = 7
 ): Traversal[] {
+  console.log(`[CORRIDORS] Starting extraction from ${drops.length} drops...`);
   const traversals: Traversal[] = [];
+  let filteredCount = { longGap: 0, tooShort: 0, unrealisticSpeed: 0, sameCell: 0, tooSlow: 0 };
   
   for (const drop of drops) {
     // Skip long gaps (vehicle parked/inactive) but process weak_signal and micro_drops
-    if (drop.reason === 'long_gap') continue;
+    if (drop.reason === 'long_gap') {
+      filteredCount.longGap++;
+      continue;
+    }
     
     const aH3 = latLngToCell(drop.startLat, drop.startLon, h3Resolution);
     const bH3 = latLngToCell(drop.endLat, drop.endLon, h3Resolution);
@@ -142,6 +147,28 @@ export function extractCorridors(
     const avgSpeedKmh = drop.durationSec > 0 
       ? (distanceKm / (drop.durationSec / 3600))
       : 0;
+    
+    // DATA QUALITY FILTERS - Remove noisy/invalid corridors
+    
+    // Filter 1: Reject micro-movements (< 10m = noise from GPS drift)
+    // Relaxed from 50m to 10m
+    if (distanceKm < 0.01) {
+      filteredCount.tooShort++;
+      continue;
+    }
+    
+    // Filter 2: Reject unrealistic speeds (GPS errors)
+    if (avgSpeedKmh > 200) {
+      filteredCount.unrealisticSpeed++;
+      continue;
+    }
+    
+    // Filter 3: Reject very low speeds - TEMPORARILY DISABLED
+    // Allow all speeds including 0 to see what data we have
+    // if (avgSpeedKmh > 0 && avgSpeedKmh < 2) {
+    //   filteredCount.tooSlow++;
+    //   continue;
+    // }
     
     traversals.push({
       corridorKey: {
@@ -160,78 +187,8 @@ export function extractCorridors(
     });
   }
   
-  return traversals;
-}
-
-/**
- * Extract corridors from all consecutive GPS points (not just drops)
- * This captures normal vehicle movement through corridors
- */
-export function extractCorridorsFromPoints(
-  points: GPSFix[],
-  h3Resolution: number = 7,
-  minTravelSec: number = 5, // Minimum 5 seconds to be a meaningful corridor
-  maxTravelSec: number = 600, // Maximum 10 minutes (otherwise likely parked/stopped)
-  minSpeedKmh: number = 1, // Must be moving (not stationary)
-  maxSpeedKmh: number = 150 // Reject unrealistic speeds
-): Traversal[] {
-  const traversals: Traversal[] = [];
-  
-  if (points.length < 2) return traversals;
-  
-  // Sort by timestamp
-  const sorted = [...points].sort((a, b) => a.ts.getTime() - b.ts.getTime());
-  
-  for (let i = 1; i < sorted.length; i++) {
-    const prev = sorted[i - 1];
-    const curr = sorted[i];
-    
-    const travelSec = (curr.ts.getTime() - prev.ts.getTime()) / 1000;
-    
-    // Skip if too short or too long (likely a gap/parked)
-    if (travelSec < minTravelSec || travelSec > maxTravelSec) continue;
-    
-    const aH3 = latLngToCell(prev.lat, prev.lon, h3Resolution);
-    const bH3 = latLngToCell(curr.lat, curr.lon, h3Resolution);
-    
-    // Skip if same cell (no movement)
-    if (aH3 === bH3) continue;
-    
-    // Calculate bearing and bucket into 16 directions
-    const from = point([prev.lon, prev.lat]);
-    const to = point([curr.lon, curr.lat]);
-    const bearingDeg = bearing(from, to);
-    const normalizedBearing = (bearingDeg + 360) % 360;
-    const directionBucket = Math.floor(normalizedBearing / 22.5) % 16;
-    
-    // Calculate distance and average speed
-    const distanceKm = distance(from, to, { units: 'kilometers' });
-    const avgSpeedKmh = travelSec > 0 
-      ? (distanceKm / (travelSec / 3600))
-      : 0;
-    
-    // Filter out unrealistic speeds (stationary or too fast)
-    if (avgSpeedKmh < minSpeedKmh || avgSpeedKmh > maxSpeedKmh) continue;
-    
-    // Filter out very short distances (GPS jitter)
-    if (distanceKm < 0.01) continue; // Less than 10 meters
-    
-    traversals.push({
-      corridorKey: {
-        aH3,
-        bH3,
-        direction: directionBucket,
-      },
-      startTs: prev.ts,
-      endTs: curr.ts,
-      travelSec,
-      avgSpeedKmh,
-      startLat: prev.lat,
-      startLon: prev.lon,
-      endLat: curr.lat,
-      endLon: curr.lon,
-    });
-  }
+  console.log(`[CORRIDORS] Extracted ${traversals.length} corridors from ${drops.length} drops`);
+  console.log(`[CORRIDORS] Filtered: ${JSON.stringify(filteredCount)}`);
   
   return traversals;
 }

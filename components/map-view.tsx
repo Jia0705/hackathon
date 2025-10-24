@@ -35,6 +35,12 @@ export function MapView({
   const [mapLoaded, setMapLoaded] = useState(false);
   const [L, setL] = useState<any>(null);
   const [h3, setH3] = useState<any>(null);
+  const hasInitialBounds = useRef<boolean>(false); // Track if we've set initial bounds
+  const userHasInteracted = useRef<boolean>(false); // Track if user has zoomed/panned
+  const lastSelectedCorridorId = useRef<string | null>(null); // Track last selected corridor
+  const lastFeatureCount = useRef<number>(0); // Track feature count to detect data changes
+  const mapSizeInvalidated = useRef<boolean>(false); // Track if map size was invalidated
+  const corridorZoomActive = useRef<boolean>(false); // Track if we're zooming to a corridor
 
   // Load Leaflet and H3 dynamically (client-side only)
   useEffect(() => {
@@ -49,6 +55,14 @@ export function MapView({
     });
   }, []);
 
+  // Clear corridorZoomActive flag when selectedCorridor becomes null
+  useEffect(() => {
+    if (selectedCorridor === null) {
+      corridorZoomActive.current = false;
+      console.log('[MAP] Cleared corridorZoomActive flag - selection ended');
+    }
+  }, [selectedCorridor]);
+
   // Initialize map
   useEffect(() => {
     if (!L || !mapContainer.current) return;
@@ -59,7 +73,7 @@ export function MapView({
     // Create map
     map.current = L.map(mapContainer.current, {
       center: center as [number, number],
-      zoom: zoom,
+      zoom: 12, // Increased to 12 for closer initial view
       zoomControl: true,
     });
 
@@ -73,11 +87,23 @@ export function MapView({
     heatmapLayerGroup.current = L.layerGroup().addTo(map.current);
     corridorLayerGroup.current = L.layerGroup().addTo(map.current);
 
+    // Track user interactions (zoom/pan) to prevent auto-zoom
+    map.current.on('zoomstart', () => {
+      userHasInteracted.current = true;
+      console.log('[MAP] User interacted - disabling auto-zoom');
+    });
+    
+    map.current.on('dragstart', () => {
+      userHasInteracted.current = true;
+      console.log('[MAP] User panned - disabling auto-zoom');
+    });
+
     // Invalidate size to ensure proper rendering
     setTimeout(() => {
       if (map.current) {
         map.current.invalidateSize();
-        console.log('[MAP] Map size invalidated');
+        mapSizeInvalidated.current = true;
+        console.log('[MAP] Map size invalidated on init');
       }
     }, 100);
 
@@ -104,6 +130,9 @@ export function MapView({
       if (heatmapLayerGroup.current) {
         heatmapLayerGroup.current.clearLayers();
       }
+      // Reset bounds tracking when no data
+      hasInitialBounds.current = false;
+      lastFeatureCount.current = 0;
       return;
     }
 
@@ -129,10 +158,16 @@ export function MapView({
     const filteredFeatures = heatmapData.features.filter((feature: any) => {
       const traversals = feature.properties?.traversals || 0;
       const instability = feature.properties?.instability || 0;
+      const shortDrops = feature.properties?.shortDrops || 0;
+      const longDrops = feature.properties?.longDrops || 0;
       
-      // Keep hexagons with at least 5 traversals (reliable data)
-      // and reasonable instability values (< 50 - extreme outliers filtered)
-      return traversals >= 5 && instability < 50;
+      // Show hexagons that have drops OR traversals (more lenient)
+      const hasData = traversals > 0 || shortDrops > 0 || longDrops > 0;
+      
+      // Filter extreme outliers only
+      const reasonableInstability = instability < 100;
+      
+      return hasData && reasonableInstability;
     });
 
     console.log(`[MAP] Filtered features: ${filteredFeatures.length} of ${heatmapData.features.length} (removed ${heatmapData.features.length - filteredFeatures.length} outliers)`);
@@ -170,18 +205,22 @@ export function MapView({
     // Use GeoJSON layer directly - Leaflet native support
     const geojsonLayer = L.geoJSON(leafletGeoJSON as any, {
       style: (feature: any) => {
-        const instability = feature?.properties?.instability || 0;
+        const shortDrops = feature?.properties?.shortDrops || 0;
+        const longDrops = feature?.properties?.longDrops || 0;
+        const totalDrops = shortDrops + longDrops;
         
-        // Determine color based on instability
+        // Determine color based on drop count (GPS signal quality indicator)
         let fillColor: string;
-        if (instability < 0.2) {
-          fillColor = '#00ff00'; // Green
-        } else if (instability < 0.5) {
-          fillColor = '#ffff00'; // Yellow
-        } else if (instability < 1) {
-          fillColor = '#ffa500'; // Orange
+        if (totalDrops === 0) {
+          fillColor = '#00ff00'; // Green - no drops (excellent signal)
+        } else if (totalDrops <= 2) {
+          fillColor = '#90EE90'; // Light green - few drops (good signal)
+        } else if (totalDrops <= 5) {
+          fillColor = '#ffff00'; // Yellow - some drops (moderate signal)
+        } else if (totalDrops <= 10) {
+          fillColor = '#ffa500'; // Orange - many drops (poor signal)
         } else {
-          fillColor = '#ff0000'; // Red
+          fillColor = '#ff0000'; // Red - frequent drops (very poor signal)
         }
 
         return {
@@ -222,15 +261,33 @@ export function MapView({
       console.log('[MAP] GeoJSON layer added to map');
     }
 
-    // Fit map to bounds
-    try {
-      const bounds = geojsonLayer.getBounds();
-      if (bounds.isValid()) {
-        map.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
-        console.log('[MAP] ✅ Map fitted to bounds:', bounds);
+    // Fit map to bounds only on initial load OR when data significantly changes
+    // BUT: Don't auto-zoom if user has manually interacted with the map OR if corridor zoom is active
+    const currentFeatureCount = filteredFeatures.length;
+    const isFirstLoad = lastFeatureCount.current === 0 && currentFeatureCount > 0;
+    const wasReset = lastFeatureCount.current > 100 && currentFeatureCount < 50; // Detect reset
+    
+    // Only auto-fit bounds on FIRST LOAD ONLY - never after that
+    if (!hasInitialBounds.current && isFirstLoad && !userHasInteracted.current && !corridorZoomActive.current) {
+      try {
+        const bounds = geojsonLayer.getBounds();
+        if (bounds.isValid()) {
+          map.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
+          hasInitialBounds.current = true;
+          lastFeatureCount.current = currentFeatureCount;
+          console.log('[MAP] ✅ Initial map bounds set:', bounds, '(features:', currentFeatureCount, ')');
+        }
+      } catch (error) {
+        console.error('[MAP] Error fitting bounds:', error);
       }
-    } catch (error) {
-      console.error('[MAP] Error fitting bounds:', error);
+    } else {
+      lastFeatureCount.current = currentFeatureCount;
+      if (currentFeatureCount > 0) {
+        const reason = corridorZoomActive.current ? 'corridor zoom active' : 
+                       userHasInteracted.current ? 'user has interacted' : 
+                       hasInitialBounds.current ? 'already initialized' : 'unknown';
+        console.log('[MAP] Skipping fitBounds -', reason, `(${currentFeatureCount} features)`);
+      }
     }
   }, [L, mapLoaded, heatmapData, onHexClick]);
 
@@ -242,6 +299,11 @@ export function MapView({
         corridorLayerGroup.current.clearLayers();
       }
       return;
+    }
+
+    // Reset selected corridor tracking if no corridor is selected
+    if (!selectedCorridor) {
+      lastSelectedCorridorId.current = null;
     }
 
     console.log('[MAP] Rendering', corridors.length, 'corridors', selectedCorridor ? '(with selected)' : '');
@@ -280,8 +342,8 @@ export function MapView({
         }
 
         // Filter out corridors with very few traversals (unreliable data)
-        // Lower threshold since we have actual data
-        if (corridor.count < 3) {
+        // TEMPORARILY DISABLED for debugging - show all corridors
+        if (corridor.count < 1) {
           filteredCount++;
           filterReasons.lowTraversal++;
           return;
@@ -298,6 +360,11 @@ export function MapView({
         // Get center coordinates of both H3 cells
         const [aLat, aLng] = h3.cellToLatLng(corridor.aH3);
         const [bLat, bLng] = h3.cellToLatLng(corridor.bH3);
+        
+        // Debug: Log first corridor coordinates
+        if (renderedCount === 0) {
+          console.log(`[MAP] First corridor coords: A(${aLat}, ${aLng}) -> B(${bLat}, ${bLng})`);
+        }
 
         // Determine color and weight based on deviation
         let color: string;
@@ -358,11 +425,51 @@ export function MapView({
           polyline.addTo(corridorLayerGroup.current);
           renderedCount++;
           
-          // Zoom to selected corridor
-          if (isSelected && map.current) {
-            const bounds = L.latLngBounds([[aLat, aLng], [bLat, bLng]]);
-            map.current.fitBounds(bounds, { padding: [100, 100], maxZoom: 12 });
-            polyline.openPopup();
+          // Zoom to selected corridor (only if it's newly selected)
+          if (isSelected && map.current && corridor.corridorId !== lastSelectedCorridorId.current) {
+            console.log('[MAP] 🎯 Zooming to selected corridor:', corridor.corridorId);
+            
+            // Set corridor zoom flag to prevent heatmap from resetting zoom
+            corridorZoomActive.current = true;
+            
+            // Calculate center point between A and B
+            const centerLat = (aLat + bLat) / 2;
+            const centerLng = (aLng + bLng) / 2;
+            
+            // Calculate appropriate zoom level based on distance
+            const distance = Math.sqrt(
+              Math.pow(aLat - bLat, 2) + Math.pow(aLng - bLng, 2)
+            );
+            
+            // Adjust zoom based on corridor length
+            // Reduced zoom levels so corridor takes ~50% of viewport (not full screen)
+            let targetZoom = 12;
+            if (distance < 0.01) {
+              targetZoom = 12; // Very short corridor (reduced from 14)
+            } else if (distance < 0.05) {
+              targetZoom = 10; // Medium corridor (reduced from 12)
+            } else {
+              targetZoom = 8; // Long corridor (reduced from 10)
+            }
+            
+            console.log(`[MAP] Corridor distance: ${distance.toFixed(4)}, target zoom: ${targetZoom}`);
+            
+            // Zoom to the corridor with smooth animation
+            map.current.setView([centerLat, centerLng], targetZoom, {
+              animate: true,
+              duration: 0.5
+            });
+            
+            // Mark as user interaction
+            userHasInteracted.current = true;
+            lastSelectedCorridorId.current = corridor.corridorId;
+            
+            // Open popup after animation completes
+            setTimeout(() => {
+              polyline.openPopup();
+              // Don't clear corridor zoom flag immediately - it should stay active
+              // for the duration of the selection (15 seconds)
+            }, 600);
           }
         }
       } catch (error) {
@@ -372,6 +479,7 @@ export function MapView({
 
     console.log(`[MAP] ✅ Corridors rendered: ${renderedCount}, filtered out: ${filteredCount}`);
     console.log(`[MAP] Filter reasons:`, filterReasons);
+    console.log(`[MAP] Total corridors to render: ${corridors.length}, Self-loops: ${filterReasons.selfLoop}, Low traversal (<1): ${filterReasons.lowTraversal}, Extreme deviation: ${filterReasons.extremeDeviation}`);
   }, [L, h3, mapLoaded, corridors, onCorridorClick, selectedCorridor]);
 
   return (
@@ -418,23 +526,27 @@ export function MapView({
       
       {/* Legend */}
       <div className="absolute bottom-4 left-4 bg-white/90 backdrop-blur-sm rounded-lg shadow-lg p-4 max-w-xs z-20">
-        <h3 className="text-sm font-semibold mb-3">Hexagon Instability</h3>
+        <h3 className="text-sm font-semibold mb-3">GPS Drop Frequency</h3>
         <div className="space-y-1 text-xs mb-4">
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded" style={{ backgroundColor: 'rgba(0, 255, 0, 0.6)' }}></div>
-            <span>Low (0 - 0.2)</span>
+            <div className="w-4 h-4 rounded" style={{ backgroundColor: 'rgba(0, 255, 0, 0.7)' }}></div>
+            <span>No Drops</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded" style={{ backgroundColor: 'rgba(255, 255, 0, 0.6)' }}></div>
-            <span>Medium-Low (0.2 - 0.5)</span>
+            <div className="w-4 h-4 rounded" style={{ backgroundColor: 'rgba(144, 238, 144, 0.7)' }}></div>
+            <span>Few (1-2 drops)</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded" style={{ backgroundColor: 'rgba(255, 165, 0, 0.6)' }}></div>
-            <span>Medium (0.5 - 1.0)</span>
+            <div className="w-4 h-4 rounded" style={{ backgroundColor: 'rgba(255, 255, 0, 0.7)' }}></div>
+            <span>Some (3-5 drops)</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded" style={{ backgroundColor: 'rgba(255, 0, 0, 0.6)' }}></div>
-            <span>High (&gt; 1.0)</span>
+            <div className="w-4 h-4 rounded" style={{ backgroundColor: 'rgba(255, 165, 0, 0.7)' }}></div>
+            <span>Many (6-10 drops)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded" style={{ backgroundColor: 'rgba(255, 0, 0, 0.7)' }}></div>
+            <span>Frequent (&gt;10 drops)</span>
           </div>
         </div>
         

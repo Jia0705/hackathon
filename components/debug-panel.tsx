@@ -88,12 +88,12 @@ export function DebugPanel() {
   const [isExpanded, setIsExpanded] = useState(false);
 
   return (
-    <Card className="overflow-hidden">
+    <Card className="overflow-hidden flex-shrink-0">
       <CardHeader className="p-3 cursor-pointer hover:bg-accent/50" onClick={() => setIsExpanded(!isExpanded)}>
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm flex items-center gap-2">
             <Database className="w-4 h-4" />
-            Stats {stats && `(${stats.corridors} corridors)`}
+            Database Stats {stats && `(${stats.corridors} corridors)`}
           </CardTitle>
           <Button
             variant="ghost"
